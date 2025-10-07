@@ -9,4 +9,4 @@ export const SEPOLIA = {
 };
 
 // Paste your deployed contract address here AFTER you deploy to Sepolia
-export const CONTRACT_ADDRESS = "0x9952f92A31B160Bc46C40beb0B5396581E257823";
+export const CONTRACT_ADDRESS = "0x8FA17Fd564a9DdcaB311f61A800e4E34FC6CbeEA";
