@@ -15,6 +15,7 @@ function App() {
   const [contract, setContract] = useState(null);
   const [loading, setLoading] = useState(false);
   const [provider, setProvider] = useState(null);
+  const [lastUpdate, setLastUpdate] = useState(Date.now());
 
   // Initialize contract when component mounts
   useEffect(() => {
@@ -27,6 +28,9 @@ function App() {
           const electionContract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer);
           setContract(electionContract);
           console.log("Contract initialized successfully");
+          
+          // Set up event listeners for real-time updates
+          setupEventListeners(electionContract);
         } catch (error) {
           console.error("Error initializing contract:", error);
         }
@@ -34,6 +38,71 @@ function App() {
       initializeContract();
     }
   }, []);
+
+  // Set up event listeners for real-time updates
+  const setupEventListeners = (contractInstance) => {
+    if (!contractInstance) return;
+
+    try {
+      // Listen for new candidates
+      contractInstance.on('CandidateAdded', (id, name) => {
+        console.log('New candidate added:', { id: id.toString(), name });
+        refreshData();
+      });
+
+      // Listen for election start
+      contractInstance.on('ElectionStarted', (round) => {
+        console.log('Election started for round:', round.toString());
+        refreshData();
+      });
+
+      // Listen for election end
+      contractInstance.on('ElectionEnded', (round) => {
+        console.log('Election ended for round:', round.toString());
+        refreshData();
+      });
+
+      // Listen for votes
+      contractInstance.on('Voted', (voter, candidateId, round) => {
+        console.log('New vote:', { voter, candidateId: candidateId.toString(), round: round.toString() });
+        refreshData();
+      });
+
+      // Listen for voter registration
+      contractInstance.on('VoterRegistered', (voter) => {
+        console.log('Voter registered:', voter);
+        refreshData();
+      });
+
+      // Listen for reset
+      contractInstance.on('ResetAll', (roundCleared) => {
+        console.log('Election reset, round cleared:', roundCleared.toString());
+        refreshData();
+      });
+
+      console.log("Event listeners set up successfully");
+    } catch (error) {
+      console.error("Error setting up event listeners:", error);
+    }
+  };
+
+  // Refresh all data
+  const refreshData = async () => {
+    if (account && contract) {
+      console.log("Refreshing data...");
+      await loadContractData(account);
+      setLastUpdate(Date.now());
+    }
+  };
+
+  // Auto-refresh every 10 seconds
+  useEffect(() => {
+    const interval = setInterval(() => {
+      refreshData();
+    }, 10000); // Refresh every 10 seconds
+
+    return () => clearInterval(interval);
+  }, [account, contract]);
 
   // Connect to wallet and load contract data
   const connectWallet = async () => {
@@ -51,6 +120,9 @@ function App() {
         const signer = await web3Provider.getSigner();
         const electionContract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer);
         setContract(electionContract);
+        
+        // Set up event listeners
+        setupEventListeners(electionContract);
         
         // Load contract data
         await loadContractData(connectedAccount, electionContract);
@@ -166,7 +238,7 @@ function App() {
       console.log("Transaction confirmed");
       
       setNewCandidate('');
-      await loadCandidates();
+      // Data will auto-refresh via event listener
       alert("Candidate added successfully!");
     } catch (error) {
       console.error("Error adding candidate:", error);
@@ -205,6 +277,7 @@ function App() {
       console.log("Transaction confirmed");
       
       setNewVoter('');
+      // Data will auto-refresh via event listener
       alert("Voter registered successfully!");
     } catch (error) {
       console.error("Error registering voter:", error);
@@ -231,7 +304,7 @@ function App() {
       await transaction.wait();
       console.log("Transaction confirmed");
       
-      setElectionStatus('Voting');
+      // Data will auto-refresh via event listener
       alert("Election started successfully!");
     } catch (error) {
       console.error("Error starting election:", error);
@@ -258,7 +331,7 @@ function App() {
       await transaction.wait();
       console.log("Transaction confirmed");
       
-      setElectionStatus('Ended');
+      // Data will auto-refresh via event listener
       alert("Election ended successfully!");
     } catch (error) {
       console.error("Error ending election:", error);
@@ -286,11 +359,9 @@ function App() {
         await transaction.wait();
         console.log("Transaction confirmed");
         
-        setCandidates([]);
-        setElectionStatus('Idle');
         setNewCandidate('');
         setNewVoter('');
-        await loadContractData(account);
+        // Data will auto-refresh via event listener
         alert("Election reset successfully!");
       } catch (error) {
         console.error("Error resetting election:", error);
@@ -328,7 +399,7 @@ function App() {
       await transaction.wait();
       console.log("Transaction confirmed");
       
-      await loadCandidates();
+      // Data will auto-refresh via event listener
       alert("Vote cast successfully!");
     } catch (error) {
       console.error("Error voting:", error);
@@ -345,6 +416,19 @@ function App() {
     setCandidates([]);
     setElectionStatus('Idle');
     setContract(null);
+    
+    // Remove event listeners
+    if (contract) {
+      contract.removeAllListeners();
+    }
+  };
+
+  // Format time for last update
+  const formatLastUpdate = () => {
+    const diff = Date.now() - lastUpdate;
+    const seconds = Math.floor(diff / 1000);
+    if (seconds < 60) return `${seconds} seconds ago`;
+    return `${Math.floor(seconds / 60)} minutes ago`;
   };
 
   return (
@@ -402,6 +486,9 @@ function App() {
                 <span className="label">Candidates:</span>
                 <span className="value">{candidates.length}</span>
               </div>
+            </div>
+            <div style={{ marginTop: '1rem', fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+              🔄 Auto-updating • Last updated: {formatLastUpdate()}
             </div>
           </div>
 
@@ -546,7 +633,8 @@ function App() {
           <p style={{ fontSize: '0.875rem', opacity: 0.8, marginTop: '0.5rem' }}>
             Contract: {contract ? '✅ Connected' : '❌ Not Connected'} | 
             Network: Sepolia | 
-            Round: {round}
+            Round: {round} |
+            🔄 Auto-update enabled
           </p>
         </div>
       </footer>
