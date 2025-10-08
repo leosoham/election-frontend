@@ -1,121 +1,350 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { ethers } from 'ethers';
 import './App.css';
+import { CONTRACT_ADDRESS, CONTRACT_ABI } from './config';
 
 function App() {
   const [account, setAccount] = useState('');
-  const [isAdmin, setIsAdmin] = useState(true);
-  const [isRegistered, setIsRegistered] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [isRegistered, setIsRegistered] = useState(false);
   const [electionStatus, setElectionStatus] = useState('Idle');
-  const [round, setRound] = useState(5);
+  const [round, setRound] = useState(0);
   const [candidates, setCandidates] = useState([]);
   const [newCandidate, setNewCandidate] = useState('');
   const [newVoter, setNewVoter] = useState('');
+  const [contract, setContract] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [provider, setProvider] = useState(null);
 
-  // Connect to wallet
+  // Initialize contract when component mounts
+  useEffect(() => {
+    if (window.ethereum) {
+      const initializeContract = async () => {
+        try {
+          const web3Provider = new ethers.BrowserProvider(window.ethereum);
+          setProvider(web3Provider);
+          const signer = await web3Provider.getSigner();
+          const electionContract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer);
+          setContract(electionContract);
+          console.log("Contract initialized successfully");
+        } catch (error) {
+          console.error("Error initializing contract:", error);
+        }
+      };
+      initializeContract();
+    }
+  }, []);
+
+  // Connect to wallet and load contract data
   const connectWallet = async () => {
     if (window.ethereum) {
       try {
+        setLoading(true);
         const accounts = await window.ethereum.request({ 
           method: 'eth_requestAccounts' 
         });
-        setAccount(accounts[0]);
-        console.log("Wallet connected:", accounts[0]);
+        const connectedAccount = accounts[0];
+        setAccount(connectedAccount);
+        
+        // Re-initialize contract with connected account
+        const web3Provider = new ethers.BrowserProvider(window.ethereum);
+        const signer = await web3Provider.getSigner();
+        const electionContract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer);
+        setContract(electionContract);
+        
+        // Load contract data
+        await loadContractData(connectedAccount, electionContract);
+        
+        console.log("Wallet connected successfully!");
       } catch (error) {
         console.error("Error connecting to wallet:", error);
-        // For demo - use a dummy account if MetaMask fails
-        setAccount('0x51b96c6d94e27ab2d992b072573ef67d15666d64');
+        alert("Error connecting to wallet: " + error.message);
+      } finally {
+        setLoading(false);
       }
     } else {
-      alert("Please install MetaMask! Using demo mode...");
-      // Demo account for testing
-      setAccount('0x51b96c6d94e27ab2d992b072573ef67d15666d64');
+      alert("Please install MetaMask!");
     }
   };
 
-  const addCandidate = () => {
+  // Load all contract data
+  const loadContractData = async (address, contractInstance = contract) => {
+    if (!contractInstance) {
+      console.log("Contract not available yet");
+      return;
+    }
+
+    try {
+      console.log("Loading contract data...");
+      
+      // Check if user is admin
+      const admin = await contractInstance.owner();
+      setIsAdmin(admin.toLowerCase() === address.toLowerCase());
+      console.log("Admin status:", admin.toLowerCase() === address.toLowerCase());
+
+      // Check if user is registered voter
+      const registered = await contractInstance.registeredVoters(address);
+      setIsRegistered(registered);
+      console.log("Registration status:", registered);
+
+      // Get election status
+      const started = await contractInstance.electionStarted();
+      const ended = await contractInstance.electionEnded();
+      
+      let status = 'Idle';
+      if (started && !ended) status = 'Voting';
+      if (ended) status = 'Ended';
+      
+      setElectionStatus(status);
+      console.log("Election status:", status);
+
+      // Get current round
+      const currentRound = await contractInstance.round();
+      setRound(Number(currentRound));
+      console.log("Current round:", Number(currentRound));
+
+      // Load candidates
+      await loadCandidates(contractInstance);
+
+    } catch (error) {
+      console.error("Error loading contract data:", error);
+    }
+  };
+
+  // Load candidates from contract
+  const loadCandidates = async (contractInstance = contract) => {
+    if (!contractInstance) return;
+
+    try {
+      const candidateCount = await contractInstance.candidatesCount();
+      const count = Number(candidateCount);
+      console.log("Total candidates:", count);
+
+      const candidatesArray = [];
+
+      for (let i = 1; i <= count; i++) {
+        try {
+          const candidate = await contractInstance.candidates(i);
+          const votes = await contractInstance.getVotes(i);
+          candidatesArray.push({
+            id: i,
+            name: candidate.name,
+            votes: Number(votes)
+          });
+        } catch (error) {
+          console.error(`Error loading candidate ${i}:`, error);
+        }
+      }
+
+      setCandidates(candidatesArray);
+      console.log("Candidates loaded:", candidatesArray);
+    } catch (error) {
+      console.error("Error loading candidates:", error);
+    }
+  };
+
+  // Add candidate (Admin only)
+  const addCandidate = async () => {
     if (!newCandidate.trim()) {
       alert("Please enter a candidate name!");
       return;
     }
-    
-    const newCandidateObj = {
-      id: candidates.length + 1,
-      name: newCandidate,
-      votes: 0
-    };
-    
-    setCandidates([...candidates, newCandidateObj]);
-    setNewCandidate('');
-    alert(`Candidate "${newCandidate}" added successfully!`);
+
+    if (!contract) {
+      alert("Contract not connected!");
+      return;
+    }
+
+    try {
+      setLoading(true);
+      console.log("Adding candidate:", newCandidate);
+      
+      const transaction = await contract.addCandidate(newCandidate);
+      console.log("Transaction sent:", transaction.hash);
+      
+      await transaction.wait();
+      console.log("Transaction confirmed");
+      
+      setNewCandidate('');
+      await loadCandidates();
+      alert("Candidate added successfully!");
+    } catch (error) {
+      console.error("Error adding candidate:", error);
+      alert("Error adding candidate: " + error.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const registerVoter = () => {
+  // Register voter (Admin only)
+  const registerVoter = async () => {
     if (!newVoter.trim()) {
       alert("Please enter a voter address!");
       return;
     }
-    
+
+    if (!contract) {
+      alert("Contract not connected!");
+      return;
+    }
+
     // Basic address validation
     if (!newVoter.startsWith('0x') || newVoter.length !== 42) {
-      alert("Please enter a valid wallet address (0x...)");
+      alert("Please enter a valid wallet address (should start with 0x and be 42 characters long)");
       return;
     }
-    
-    alert(`Voter ${newVoter} registered successfully!`);
-    setNewVoter('');
-  };
 
-  const startElection = () => {
-    if (candidates.length === 0) {
-      alert("Please add at least one candidate before starting the election!");
-      return;
-    }
-    
-    setElectionStatus('Voting');
-    alert("Election started! Voting is now open.");
-  };
-
-  const endElection = () => {
-    setElectionStatus('Ended');
-    alert("Election ended! Results are final.");
-  };
-
-  const resetAll = () => {
-    if (window.confirm("Are you sure you want to reset the election? This will remove all candidates.")) {
-      setCandidates([]);
-      setElectionStatus('Idle');
-      setNewCandidate('');
+    try {
+      setLoading(true);
+      console.log("Registering voter:", newVoter);
+      
+      const transaction = await contract.registerVoter(newVoter);
+      console.log("Transaction sent:", transaction.hash);
+      
+      await transaction.wait();
+      console.log("Transaction confirmed");
+      
       setNewVoter('');
-      alert("Election has been reset!");
+      alert("Voter registered successfully!");
+    } catch (error) {
+      console.error("Error registering voter:", error);
+      alert("Error registering voter: " + error.message);
+    } finally {
+      setLoading(false);
     }
   };
 
-  const vote = (candidateId) => {
-    if (electionStatus !== 'Voting') {
-      alert("Voting is not active right now!");
+  // Start election (Admin only)
+  const startElection = async () => {
+    if (!contract) {
+      alert("Contract not connected!");
       return;
     }
-    
+
+    try {
+      setLoading(true);
+      console.log("Starting election...");
+      
+      const transaction = await contract.startElection();
+      console.log("Transaction sent:", transaction.hash);
+      
+      await transaction.wait();
+      console.log("Transaction confirmed");
+      
+      setElectionStatus('Voting');
+      alert("Election started successfully!");
+    } catch (error) {
+      console.error("Error starting election:", error);
+      alert("Error starting election: " + error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // End election (Admin only)
+  const endElection = async () => {
+    if (!contract) {
+      alert("Contract not connected!");
+      return;
+    }
+
+    try {
+      setLoading(true);
+      console.log("Ending election...");
+      
+      const transaction = await contract.endElection();
+      console.log("Transaction sent:", transaction.hash);
+      
+      await transaction.wait();
+      console.log("Transaction confirmed");
+      
+      setElectionStatus('Ended');
+      alert("Election ended successfully!");
+    } catch (error) {
+      console.error("Error ending election:", error);
+      alert("Error ending election: " + error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Reset election (Admin only)
+  const resetAll = async () => {
+    if (!contract) {
+      alert("Contract not connected!");
+      return;
+    }
+
+    if (window.confirm("Are you sure you want to reset the election? This will remove all candidates and votes.")) {
+      try {
+        setLoading(true);
+        console.log("Resetting election...");
+        
+        const transaction = await contract.resetAll();
+        console.log("Transaction sent:", transaction.hash);
+        
+        await transaction.wait();
+        console.log("Transaction confirmed");
+        
+        setCandidates([]);
+        setElectionStatus('Idle');
+        setNewCandidate('');
+        setNewVoter('');
+        await loadContractData(account);
+        alert("Election reset successfully!");
+      } catch (error) {
+        console.error("Error resetting election:", error);
+        alert("Error resetting election: " + error.message);
+      } finally {
+        setLoading(false);
+      }
+    }
+  };
+
+  // Vote for candidate
+  const vote = async (candidateId) => {
+    if (!contract) {
+      alert("Contract not connected!");
+      return;
+    }
+
     if (!isRegistered) {
       alert("You are not registered to vote!");
       return;
     }
-    
-    const updatedCandidates = candidates.map(candidate => {
-      if (candidate.id === candidateId) {
-        return { ...candidate, votes: candidate.votes + 1 };
-      }
-      return candidate;
-    });
-    
-    setCandidates(updatedCandidates);
-    alert(`Voted for candidate #${candidateId} successfully!`);
+
+    if (electionStatus !== 'Voting') {
+      alert("Voting is not active right now!");
+      return;
+    }
+
+    try {
+      setLoading(true);
+      console.log("Voting for candidate:", candidateId);
+      
+      const transaction = await contract.vote(candidateId);
+      console.log("Transaction sent:", transaction.hash);
+      
+      await transaction.wait();
+      console.log("Transaction confirmed");
+      
+      await loadCandidates();
+      alert("Vote cast successfully!");
+    } catch (error) {
+      console.error("Error voting:", error);
+      alert("Error voting: " + error.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const disconnectWallet = () => {
     setAccount('');
     setIsAdmin(false);
     setIsRegistered(false);
+    setCandidates([]);
+    setElectionStatus('Idle');
+    setContract(null);
   };
 
   return (
@@ -145,8 +374,8 @@ function App() {
                 </button>
               </div>
             ) : (
-              <button className="connect-wallet-btn" onClick={connectWallet}>
-                Connect Wallet
+              <button className="connect-wallet-btn" onClick={connectWallet} disabled={loading}>
+                {loading ? 'Connecting...' : 'Connect Wallet'}
               </button>
             )}
           </div>
@@ -176,8 +405,16 @@ function App() {
             </div>
           </div>
 
+          {/* Connection Status */}
+          {!contract && (
+            <div className="status-card" style={{ borderLeft: '4px solid var(--error-color)' }}>
+              <h3>⚠️ Contract Not Connected</h3>
+              <p>Connect your wallet to interact with the election contract.</p>
+            </div>
+          )}
+
           {/* Admin Panel */}
-          {isAdmin && (
+          {isAdmin && contract && (
             <div className="admin-panel">
               <h2 className="panel-title">Admin Controls</h2>
               
@@ -191,10 +428,10 @@ function App() {
                       value={newCandidate}
                       onChange={(e) => setNewCandidate(e.target.value)}
                       className="input-field"
-                      onKeyPress={(e) => e.key === 'Enter' && addCandidate()}
+                      disabled={loading}
                     />
-                    <button onClick={addCandidate} className="action-btn primary">
-                      Add Candidate
+                    <button onClick={addCandidate} className="action-btn primary" disabled={loading}>
+                      {loading ? 'Adding...' : 'Add Candidate'}
                     </button>
                   </div>
                 </div>
@@ -208,10 +445,10 @@ function App() {
                       value={newVoter}
                       onChange={(e) => setNewVoter(e.target.value)}
                       className="input-field"
-                      onKeyPress={(e) => e.key === 'Enter' && registerVoter()}
+                      disabled={loading}
                     />
-                    <button onClick={registerVoter} className="action-btn primary">
-                      Register Voter
+                    <button onClick={registerVoter} className="action-btn primary" disabled={loading}>
+                      {loading ? 'Registering...' : 'Register Voter'}
                     </button>
                   </div>
                 </div>
@@ -222,19 +459,19 @@ function App() {
                     <button 
                       onClick={startElection} 
                       className="control-btn start"
-                      disabled={electionStatus === 'Voting'}
+                      disabled={loading || electionStatus === 'Voting'}
                     >
-                      Start Election
+                      {loading ? 'Starting...' : 'Start Election'}
                     </button>
                     <button 
                       onClick={endElection} 
                       className="control-btn end"
-                      disabled={electionStatus !== 'Voting'}
+                      disabled={loading || electionStatus !== 'Voting'}
                     >
-                      End Election
+                      {loading ? 'Ending...' : 'End Election'}
                     </button>
-                    <button onClick={resetAll} className="control-btn reset">
-                      Reset All
+                    <button onClick={resetAll} className="control-btn reset" disabled={loading}>
+                      {loading ? 'Resetting...' : 'Reset All'}
                     </button>
                   </div>
                 </div>
@@ -261,8 +498,9 @@ function App() {
                       <button 
                         onClick={() => vote(candidate.id)}
                         className="vote-btn"
+                        disabled={loading}
                       >
-                        Vote
+                        {loading ? 'Voting...' : 'Vote'}
                       </button>
                     )}
                     {electionStatus === 'Ended' && (
@@ -276,7 +514,7 @@ function App() {
             ) : (
               <div className="empty-state">
                 <p>No candidates have been added to this election yet.</p>
-                {isAdmin && (
+                {isAdmin && contract && (
                   <p>Use the admin panel above to add candidates.</p>
                 )}
               </div>
@@ -284,17 +522,17 @@ function App() {
           </div>
 
           {/* Voter Instructions */}
-          {!isAdmin && (
+          {!isAdmin && contract && (
             <div className="status-card">
               <h3>Voter Instructions</h3>
               <p>
-                {electionStatus === 'Idle' && "Election is idle. Wait for admin to start voting."}
-                {electionStatus === 'Voting' && "Voting is active! Click the Vote button for your preferred candidate."}
-                {electionStatus === 'Ended' && "Election has ended. View the results above."}
+                {electionStatus === 'Idle' && "🏛️ Election is idle. Wait for admin to start voting."}
+                {electionStatus === 'Voting' && "🗳️ Voting is active! Click the Vote button for your preferred candidate."}
+                {electionStatus === 'Ended' && "🏁 Election has ended. View the results above."}
               </p>
               {!isRegistered && (
                 <p style={{ color: 'var(--error-color)', marginTop: '0.5rem' }}>
-                  You are not registered to vote. Contact the admin to get registered.
+                  ❌ You are not registered to vote. Contact the admin to get registered.
                 </p>
               )}
             </div>
@@ -302,12 +540,11 @@ function App() {
         </div>
       </main>
 
-      {/* Footer */}
       <footer className="app-footer">
         <div className="container">
           <p>Decentralized Election System • Secure • Transparent • Trustless</p>
           <p style={{ fontSize: '0.875rem', opacity: 0.8, marginTop: '0.5rem' }}>
-            Contract: {account ? 'Connected' : 'Not Connected'} | 
+            Contract: {contract ? '✅ Connected' : '❌ Not Connected'} | 
             Network: Sepolia | 
             Round: {round}
           </p>
