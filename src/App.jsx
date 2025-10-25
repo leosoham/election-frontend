@@ -1,645 +1,499 @@
-import React, { useState, useEffect } from 'react';
-import { ethers } from 'ethers';
-import './App.css';
-import { CONTRACT_ADDRESS, CONTRACT_ABI } from './config';
+import React, { useState, useEffect } from "react";
+import { getFactoryContract, getElectionContract } from "./contract";
+import "./App.css";
 
 function App() {
-  const [account, setAccount] = useState('');
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [isRegistered, setIsRegistered] = useState(false);
-  const [electionStatus, setElectionStatus] = useState('Idle');
-  const [round, setRound] = useState(0);
-  const [candidates, setCandidates] = useState([]);
-  const [newCandidate, setNewCandidate] = useState('');
-  const [newVoter, setNewVoter] = useState('');
-  const [contract, setContract] = useState(null);
+  const [account, setAccount] = useState("");
+  const [factory, setFactory] = useState(null);
+  const [elections, setElections] = useState([]);
+  const [selectedElection, setSelectedElection] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [provider, setProvider] = useState(null);
-  const [lastUpdate, setLastUpdate] = useState(Date.now());
+  const [newTitle, setNewTitle] = useState("");
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // Initialize contract when component mounts
+  // Add event listeners for account changes
   useEffect(() => {
     if (window.ethereum) {
-      const initializeContract = async () => {
-        try {
-          const web3Provider = new ethers.BrowserProvider(window.ethereum);
-          setProvider(web3Provider);
-          const signer = await web3Provider.getSigner();
-          const electionContract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer);
-          setContract(electionContract);
-          console.log("Contract initialized successfully");
-          
-          // Set up event listeners for real-time updates
-          setupEventListeners(electionContract);
-        } catch (error) {
-          console.error("Error initializing contract:", error);
+      const handleAccountsChanged = (accounts) => {
+        if (accounts.length === 0) {
+          // User disconnected
+          setAccount("");
+          setFactory(null);
+          setElections([]);
+          setSelectedElection(null);
+        } else if (accounts[0] !== account) {
+          // User switched accounts
+          setAccount(accounts[0]);
+          // Reload elections for new account
+          if (factory) {
+            loadElections(factory);
+          }
         }
       };
-      initializeContract();
-    }
-  }, []);
 
-  // Set up event listeners for real-time updates
-  const setupEventListeners = (contractInstance) => {
-    if (!contractInstance) return;
+      window.ethereum.on('accountsChanged', handleAccountsChanged);
 
-    try {
-      // Listen for new candidates
-      contractInstance.on('CandidateAdded', (id, name) => {
-        console.log('New candidate added:', { id: id.toString(), name });
-        refreshData();
-      });
-
-      // Listen for election start
-      contractInstance.on('ElectionStarted', (round) => {
-        console.log('Election started for round:', round.toString());
-        refreshData();
-      });
-
-      // Listen for election end
-      contractInstance.on('ElectionEnded', (round) => {
-        console.log('Election ended for round:', round.toString());
-        refreshData();
-      });
-
-      // Listen for votes
-      contractInstance.on('Voted', (voter, candidateId, round) => {
-        console.log('New vote:', { voter, candidateId: candidateId.toString(), round: round.toString() });
-        refreshData();
-      });
-
-      // Listen for voter registration
-      contractInstance.on('VoterRegistered', (voter) => {
-        console.log('Voter registered:', voter);
-        refreshData();
-      });
-
-      // Listen for reset
-      contractInstance.on('ResetAll', (roundCleared) => {
-        console.log('Election reset, round cleared:', roundCleared.toString());
-        refreshData();
-      });
-
-      console.log("Event listeners set up successfully");
-    } catch (error) {
-      console.error("Error setting up event listeners:", error);
-    }
-  };
-
-  // Refresh all data
-  const refreshData = async () => {
-    if (account && contract) {
-      console.log("Refreshing data...");
-      await loadContractData(account);
-      setLastUpdate(Date.now());
-    }
-  };
-
-  // Auto-refresh every 10 seconds
-  useEffect(() => {
-    const interval = setInterval(() => {
-      refreshData();
-    }, 10000); // Refresh every 10 seconds
-
-    return () => clearInterval(interval);
-  }, [account, contract]);
-
-  // Connect to wallet and load contract data
-  const connectWallet = async () => {
-    if (window.ethereum) {
-      try {
-        setLoading(true);
-        const accounts = await window.ethereum.request({ 
-          method: 'eth_requestAccounts' 
-        });
-        const connectedAccount = accounts[0];
-        setAccount(connectedAccount);
-        
-        // Re-initialize contract with connected account
-        const web3Provider = new ethers.BrowserProvider(window.ethereum);
-        const signer = await web3Provider.getSigner();
-        const electionContract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer);
-        setContract(electionContract);
-        
-        // Set up event listeners
-        setupEventListeners(electionContract);
-        
-        // Load contract data
-        await loadContractData(connectedAccount, electionContract);
-        
-        console.log("Wallet connected successfully!");
-      } catch (error) {
-        console.error("Error connecting to wallet:", error);
-        alert("Error connecting to wallet: " + error.message);
-      } finally {
-        setLoading(false);
-      }
-    } else {
-      alert("Please install MetaMask!");
-    }
-  };
-
-  // Load all contract data
-  const loadContractData = async (address, contractInstance = contract) => {
-    if (!contractInstance) {
-      console.log("Contract not available yet");
-      return;
-    }
-
-    try {
-      console.log("Loading contract data...");
-      
-      // Check if user is admin
-      const admin = await contractInstance.owner();
-      setIsAdmin(admin.toLowerCase() === address.toLowerCase());
-      console.log("Admin status:", admin.toLowerCase() === address.toLowerCase());
-
-      // Check if user is registered voter
-      const registered = await contractInstance.registeredVoters(address);
-      setIsRegistered(registered);
-      console.log("Registration status:", registered);
-
-      // Get election status
-      const started = await contractInstance.electionStarted();
-      const ended = await contractInstance.electionEnded();
-      
-      let status = 'Idle';
-      if (started && !ended) status = 'Voting';
-      if (ended) status = 'Ended';
-      
-      setElectionStatus(status);
-      console.log("Election status:", status);
-
-      // Get current round
-      const currentRound = await contractInstance.round();
-      setRound(Number(currentRound));
-      console.log("Current round:", Number(currentRound));
-
-      // Load candidates
-      await loadCandidates(contractInstance);
-
-    } catch (error) {
-      console.error("Error loading contract data:", error);
-    }
-  };
-
-  // Load candidates from contract
-  const loadCandidates = async (contractInstance = contract) => {
-    if (!contractInstance) return;
-
-    try {
-      const candidateCount = await contractInstance.candidatesCount();
-      const count = Number(candidateCount);
-      console.log("Total candidates:", count);
-
-      const candidatesArray = [];
-
-      for (let i = 1; i <= count; i++) {
-        try {
-          const candidate = await contractInstance.candidates(i);
-          const votes = await contractInstance.getVotes(i);
-          candidatesArray.push({
-            id: i,
-            name: candidate.name,
-            votes: Number(votes)
-          });
-        } catch (error) {
-          console.error(`Error loading candidate ${i}:`, error);
+      return () => {
+        if (window.ethereum.removeListener) {
+          window.ethereum.removeListener('accountsChanged', handleAccountsChanged);
         }
-      }
-
-      setCandidates(candidatesArray);
-      console.log("Candidates loaded:", candidatesArray);
-    } catch (error) {
-      console.error("Error loading candidates:", error);
+      };
     }
-  };
+  }, [account, factory]);
 
-  // Add candidate (Admin only)
-  const addCandidate = async () => {
-    if (!newCandidate.trim()) {
-      alert("Please enter a candidate name!");
+  // Connect MetaMask
+  const connectWallet = async () => {
+    if (!window.ethereum) {
+      alert("Please install MetaMask first!");
       return;
     }
-
-    if (!contract) {
-      alert("Contract not connected!");
-      return;
-    }
-
     try {
-      setLoading(true);
-      console.log("Adding candidate:", newCandidate);
-      
-      const transaction = await contract.addCandidate(newCandidate);
-      console.log("Transaction sent:", transaction.hash);
-      
-      await transaction.wait();
-      console.log("Transaction confirmed");
-      
-      setNewCandidate('');
-      // Data will auto-refresh via event listener
-      alert("Candidate added successfully!");
+      const [acc] = await window.ethereum.request({
+        method: "eth_requestAccounts",
+      });
+      setAccount(acc);
+      const factoryContract = await getFactoryContract();
+      setFactory(factoryContract);
+      await loadElections(factoryContract);
     } catch (error) {
-      console.error("Error adding candidate:", error);
-      alert("Error adding candidate: " + error.message);
-    } finally {
-      setLoading(false);
+      console.error("Wallet connection failed:", error);
     }
   };
 
-  // Register voter (Admin only)
-  const registerVoter = async () => {
-    if (!newVoter.trim()) {
-      alert("Please enter a voter address!");
+  // Load all elections from the factory
+  const loadElections = async (factoryContract, forceRefresh = false) => {
+    if (!factoryContract) {
+      console.error("No factory contract available");
       return;
     }
-
-    if (!contract) {
-      alert("Contract not connected!");
-      return;
-    }
-
-    // Basic address validation
-    if (!newVoter.startsWith('0x') || newVoter.length !== 42) {
-      alert("Please enter a valid wallet address (should start with 0x and be 42 characters long)");
-      return;
-    }
-
-    try {
-      setLoading(true);
-      console.log("Registering voter:", newVoter);
-      
-      const transaction = await contract.registerVoter(newVoter);
-      console.log("Transaction sent:", transaction.hash);
-      
-      await transaction.wait();
-      console.log("Transaction confirmed");
-      
-      setNewVoter('');
-      // Data will auto-refresh via event listener
-      alert("Voter registered successfully!");
-    } catch (error) {
-      console.error("Error registering voter:", error);
-      alert("Error registering voter: " + error.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Start election (Admin only)
-  const startElection = async () => {
-    if (!contract) {
-      alert("Contract not connected!");
-      return;
-    }
-
-    try {
-      setLoading(true);
-      console.log("Starting election...");
-      
-      const transaction = await contract.startElection();
-      console.log("Transaction sent:", transaction.hash);
-      
-      await transaction.wait();
-      console.log("Transaction confirmed");
-      
-      // Data will auto-refresh via event listener
-      alert("Election started successfully!");
-    } catch (error) {
-      console.error("Error starting election:", error);
-      alert("Error starting election: " + error.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // End election (Admin only)
-  const endElection = async () => {
-    if (!contract) {
-      alert("Contract not connected!");
-      return;
-    }
-
-    try {
-      setLoading(true);
-      console.log("Ending election...");
-      
-      const transaction = await contract.endElection();
-      console.log("Transaction sent:", transaction.hash);
-      
-      await transaction.wait();
-      console.log("Transaction confirmed");
-      
-      // Data will auto-refresh via event listener
-      alert("Election ended successfully!");
-    } catch (error) {
-      console.error("Error ending election:", error);
-      alert("Error ending election: " + error.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Reset election (Admin only)
-  const resetAll = async () => {
-    if (!contract) {
-      alert("Contract not connected!");
-      return;
-    }
-
-    if (window.confirm("Are you sure you want to reset the election? This will remove all candidates and votes.")) {
-      try {
-        setLoading(true);
-        console.log("Resetting election...");
-        
-        const transaction = await contract.resetAll();
-        console.log("Transaction sent:", transaction.hash);
-        
-        await transaction.wait();
-        console.log("Transaction confirmed");
-        
-        setNewCandidate('');
-        setNewVoter('');
-        // Data will auto-refresh via event listener
-        alert("Election reset successfully!");
-      } catch (error) {
-        console.error("Error resetting election:", error);
-        alert("Error resetting election: " + error.message);
-      } finally {
-        setLoading(false);
-      }
-    }
-  };
-
-  // Vote for candidate
-  const vote = async (candidateId) => {
-    if (!contract) {
-      alert("Contract not connected!");
-      return;
-    }
-
-    if (!isRegistered) {
-      alert("You are not registered to vote!");
-      return;
-    }
-
-    if (electionStatus !== 'Voting') {
-      alert("Voting is not active right now!");
-      return;
-    }
-
-    try {
-      setLoading(true);
-      console.log("Voting for candidate:", candidateId);
-      
-      const transaction = await contract.vote(candidateId);
-      console.log("Transaction sent:", transaction.hash);
-      
-      await transaction.wait();
-      console.log("Transaction confirmed");
-      
-      // Data will auto-refresh via event listener
-      alert("Vote cast successfully!");
-    } catch (error) {
-      console.error("Error voting:", error);
-      alert("Error voting: " + error.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const disconnectWallet = () => {
-    setAccount('');
-    setIsAdmin(false);
-    setIsRegistered(false);
-    setCandidates([]);
-    setElectionStatus('Idle');
-    setContract(null);
     
-    // Remove event listeners
-    if (contract) {
-      contract.removeAllListeners();
+    if (forceRefresh) {
+      setIsRefreshing(true);
+    }
+    
+    try {
+      console.log("🔄 Starting election load process...", { forceRefresh });
+      
+      // Clear existing elections first
+      if (forceRefresh) {
+        setElections([]);
+      }
+      
+      // Always use getElectionsCount method (getAllElections is unreliable)
+      console.log("📋 Using getElectionsCount() method (most reliable)...");
+      try {
+        const electionsCount = await factoryContract.getElectionsCount();
+        console.log("✅ Elections count:", electionsCount);
+        
+        if (Number(electionsCount) > 0) {
+          const electionsList = [];
+          console.log("🔍 Processing elections from getElectionsCount...");
+          
+          for (let i = 0; i < Number(electionsCount); i++) {
+            console.log(`📝 Processing election ${i + 1}/${electionsCount}`);
+            try {
+              const electionData = await factoryContract.getElection(i);
+              console.log(`✅ Election ${i + 1} data:`, electionData);
+              
+              electionsList.push({
+                id: i + 1,
+                address: electionData.electionAddress,
+                title: electionData.title,
+                admin: electionData.admin
+              });
+            } catch (electionErr) {
+              console.error(`❌ Error fetching election ${i}:`, electionErr);
+            }
+          }
+          
+          console.log("🎯 Final elections list from getElectionsCount:", electionsList);
+          setElections(electionsList);
+        } else {
+          console.log("⚠️ No elections found via getElectionsCount");
+          setElections([]);
+        }
+      } catch (countError) {
+        console.error("❌ getElectionsCount failed:", countError);
+        setElections([]);
+      }
+      
+    } catch (err) {
+      console.error("💥 Critical error loading elections:", err);
+      alert("Error loading elections: " + err.message);
+    } finally {
+      if (forceRefresh) {
+        setIsRefreshing(false);
+      }
     }
   };
 
-  // Format time for last update
-  const formatLastUpdate = () => {
-    const diff = Date.now() - lastUpdate;
-    const seconds = Math.floor(diff / 1000);
-    if (seconds < 60) return `${seconds} seconds ago`;
-    return `${Math.floor(seconds / 60)} minutes ago`;
+  // Create new election
+  const createElection = async () => {
+    if (!newTitle.trim()) return alert("Please enter a title!");
+    if (!factory) return alert("Factory not connected!");
+    
+    try {
+      setLoading(true);
+      console.log("🚀 Creating election:", newTitle);
+      
+      // Get current elections count before creation
+      const electionsCountBefore = await factory.getElectionsCount();
+      console.log("📊 Elections count before creation:", electionsCountBefore.toString());
+      
+      // Create the election
+      console.log("📝 Sending createElection transaction...");
+      const tx = await factory.createElection(newTitle);
+      console.log("⏳ Transaction sent, waiting for confirmation...", tx.hash);
+      
+      // Wait for transaction confirmation
+      const receipt = await tx.wait();
+      console.log("✅ Transaction confirmed!", receipt);
+      
+      // Verify the election was created
+      const electionsCountAfter = await factory.getElectionsCount();
+      console.log("📊 Elections count after creation:", electionsCountAfter.toString());
+      
+      if (Number(electionsCountAfter) > Number(electionsCountBefore)) {
+        alert("✅ Election created successfully!");
+        setNewTitle("");
+        // Refresh the elections list after creating a new election
+        await loadElections(factory, true);
+      } else {
+        alert("⚠️ Election creation may have failed - no new election detected");
+      }
+      
+    } catch (err) {
+      console.error("💥 Error creating election:", err);
+      
+      // Provide more specific error messages
+      if (err.code === 'ACTION_REJECTED') {
+        alert("❌ Transaction was rejected by user");
+      } else if (err.code === 'INSUFFICIENT_FUNDS') {
+        alert("❌ Insufficient funds for transaction");
+      } else if (err.message.includes('gas')) {
+        alert("❌ Gas estimation failed: " + err.message);
+      } else {
+        alert("❌ Error: " + (err.reason || err.message));
+      }
+    } finally {
+      setLoading(false);
+    }
   };
 
+  // When user selects an election → open detailed page
+  const handleSelectElection = async (electionAddress) => {
+    const electionContract = await getElectionContract(electionAddress);
+    setSelectedElection({ address: electionAddress, contract: electionContract });
+  };
+
+  // Disconnect
+  const disconnectWallet = () => {
+    setAccount("");
+    setFactory(null);
+    setElections([]);
+    setSelectedElection(null);
+  };
+
+  // Render main dashboard or election page
   return (
     <div className="app">
-      {/* Header */}
       <header className="app-header">
-        <div className="container">
-          <h1 className="app-title">CR Election DApp</h1>
-          <div className="wallet-section">
-            {account ? (
-              <div className="account-info">
-                <span className="account-address">
-                  {account.substring(0, 6)}...{account.substring(account.length - 4)}
-                </span>
-                <div className="status-badges">
-                  {isAdmin && <span className="badge admin">Admin</span>}
-                  <span className={`badge ${isRegistered ? 'registered' : 'not-registered'}`}>
-                    {isRegistered ? 'Registered' : 'Not Registered'}
-                  </span>
-                </div>
-                <button 
-                  onClick={disconnectWallet} 
-                  className="connect-wallet-btn"
-                  style={{ marginTop: '0.5rem', fontSize: '0.75rem', padding: '0.25rem 0.5rem' }}
-                >
-                  Disconnect
-                </button>
-              </div>
-            ) : (
-              <button className="connect-wallet-btn" onClick={connectWallet} disabled={loading}>
-                {loading ? 'Connecting...' : 'Connect Wallet'}
-              </button>
-            )}
+        <h1>🗳️ Decentralized Election System</h1>
+        {account ? (
+          <div>
+            <p>
+              Connected: {account.slice(0, 6)}...{account.slice(-4)}
+            </p>
+            <button onClick={disconnectWallet} className="action-btn">
+              Disconnect
+            </button>
           </div>
-        </div>
+        ) : (
+          <button onClick={connectWallet} className="action-btn primary">
+            Connect Wallet
+          </button>
+        )}
       </header>
 
-      {/* Main Content */}
-      <main className="app-main">
-        <div className="container">
-          {/* Election Status Card */}
-          <div className="status-card">
-            <div className="status-info">
-              <div className="status-item">
-                <span className="label">Round:</span>
-                <span className="value">{round}</span>
+      {/* If no election selected → show dashboard */}
+      {!selectedElection && (
+        <main className="container">
+          {account && (
+            <>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                <h2>Available Elections</h2>
+                <button 
+                  onClick={() => loadElections(factory, true)} 
+                  className="action-btn small"
+                  style={{ background: '#64748b' }}
+                  disabled={isRefreshing}
+                >
+                  {isRefreshing ? '⏳ Loading...' : '🔄 Refresh'}
+                </button>
               </div>
-              <div className="status-item">
-                <span className="label">Status:</span>
-                <span className={`status-value ${electionStatus.toLowerCase()}`}>
-                  {electionStatus}
-                </span>
-              </div>
-              <div className="status-item">
-                <span className="label">Candidates:</span>
-                <span className="value">{candidates.length}</span>
-              </div>
-            </div>
-            <div style={{ marginTop: '1rem', fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
-              🔄 Auto-updating • Last updated: {formatLastUpdate()}
-            </div>
-          </div>
-
-          {/* Connection Status */}
-          {!contract && (
-            <div className="status-card" style={{ borderLeft: '4px solid var(--error-color)' }}>
-              <h3>⚠️ Contract Not Connected</h3>
-              <p>Connect your wallet to interact with the election contract.</p>
-            </div>
-          )}
-
-          {/* Admin Panel */}
-          {isAdmin && contract && (
-            <div className="admin-panel">
-              <h2 className="panel-title">Admin Controls</h2>
-              
-              <div className="admin-actions">
-                <div className="action-group">
-                  <h3>Manage Candidates</h3>
-                  <div className="input-group">
-                    <input
-                      type="text"
-                      placeholder="Enter candidate name"
-                      value={newCandidate}
-                      onChange={(e) => setNewCandidate(e.target.value)}
-                      className="input-field"
-                      disabled={loading}
-                    />
-                    <button onClick={addCandidate} className="action-btn primary" disabled={loading}>
-                      {loading ? 'Adding...' : 'Add Candidate'}
-                    </button>
-                  </div>
-                </div>
-
-                <div className="action-group">
-                  <h3>Manage Voters</h3>
-                  <div className="input-group">
-                    <input
-                      type="text"
-                      placeholder="Enter voter wallet address (0x...)"
-                      value={newVoter}
-                      onChange={(e) => setNewVoter(e.target.value)}
-                      className="input-field"
-                      disabled={loading}
-                    />
-                    <button onClick={registerVoter} className="action-btn primary" disabled={loading}>
-                      {loading ? 'Registering...' : 'Register Voter'}
-                    </button>
-                  </div>
-                </div>
-
-                <div className="election-controls">
-                  <h3>Election Controls</h3>
-                  <div className="control-buttons">
-                    <button 
-                      onClick={startElection} 
-                      className="control-btn start"
-                      disabled={loading || electionStatus === 'Voting'}
-                    >
-                      {loading ? 'Starting...' : 'Start Election'}
-                    </button>
-                    <button 
-                      onClick={endElection} 
-                      className="control-btn end"
-                      disabled={loading || electionStatus !== 'Voting'}
-                    >
-                      {loading ? 'Ending...' : 'End Election'}
-                    </button>
-                    <button onClick={resetAll} className="control-btn reset" disabled={loading}>
-                      {loading ? 'Resetting...' : 'Reset All'}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Candidates Section */}
-          <div className="candidates-section">
-            <h2 className="section-title">
-              {candidates.length > 0 ? `Candidates (${candidates.length})` : 'No candidates yet'}
-            </h2>
-            
-            {candidates.length > 0 ? (
-              <div className="candidates-grid">
-                {candidates.map((candidate) => (
-                  <div key={candidate.id} className="candidate-card">
-                    <div className="candidate-info">
-                      <h3 className="candidate-name">{candidate.name}</h3>
-                      <p className="candidate-id">ID: {candidate.id}</p>
-                      <p className="candidate-votes">Votes: {candidate.votes}</p>
-                    </div>
-                    {isRegistered && electionStatus === 'Voting' && (
-                      <button 
-                        onClick={() => vote(candidate.id)}
-                        className="vote-btn"
-                        disabled={loading}
-                      >
-                        {loading ? 'Voting...' : 'Vote'}
-                      </button>
-                    )}
-                    {electionStatus === 'Ended' && (
-                      <div className="result-badge">
-                        Final
+              {elections.length === 0 ? (
+                <p>No elections yet.</p>
+              ) : (
+                <ul>
+                  {elections.map((el) => (
+                    <li key={el.id}>
+                      <div>
+                        <strong>{el.title}</strong>
+                        <br />
+                        <small style={{ color: '#64748b', fontSize: '0.875rem' }}>
+                          Address: {el.address}
+                        </small>
                       </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="empty-state">
-                <p>No candidates have been added to this election yet.</p>
-                {isAdmin && contract && (
-                  <p>Use the admin panel above to add candidates.</p>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Voter Instructions */}
-          {!isAdmin && contract && (
-            <div className="status-card">
-              <h3>Voter Instructions</h3>
-              <p>
-                {electionStatus === 'Idle' && "🏛️ Election is idle. Wait for admin to start voting."}
-                {electionStatus === 'Voting' && "🗳️ Voting is active! Click the Vote button for your preferred candidate."}
-                {electionStatus === 'Ended' && "🏁 Election has ended. View the results above."}
-              </p>
-              {!isRegistered && (
-                <p style={{ color: 'var(--error-color)', marginTop: '0.5rem' }}>
-                  ❌ You are not registered to vote. Contact the admin to get registered.
-                </p>
+                      <button
+                        onClick={() => handleSelectElection(el.address)}
+                        className="action-btn small"
+                      >
+                        Enter
+                      </button>
+                    </li>
+                  ))}
+                </ul>
               )}
-            </div>
-          )}
-        </div>
-      </main>
 
-      <footer className="app-footer">
-        <div className="container">
-          <p>Decentralized Election System • Secure • Transparent • Trustless</p>
-          <p style={{ fontSize: '0.875rem', opacity: 0.8, marginTop: '0.5rem' }}>
-            Contract: {contract ? '✅ Connected' : '❌ Not Connected'} | 
-            Network: Sepolia | 
-            Round: {round} |
-            🔄 Auto-update enabled
-          </p>
-        </div>
-      </footer>
+              <div className="create-section">
+                <input
+                  type="text"
+                  placeholder="Election Title"
+                  value={newTitle}
+                  onChange={(e) => setNewTitle(e.target.value)}
+                />
+                <button onClick={createElection} disabled={loading} className="action-btn primary">
+                  {loading ? "Creating..." : "Create Election"}
+                </button>
+              </div>
+            </>
+          )}
+        </main>
+      )}
+
+      {/* If election selected → show ElectionPage */}
+      {selectedElection && (
+        <ElectionPage
+          election={selectedElection}
+          onBack={() => setSelectedElection(null)}
+          account={account}
+        />
+      )}
     </div>
   );
 }
+
+function ElectionPage({ election, onBack, account }) {
+  const [title, setTitle] = useState("");
+  const [candidates, setCandidates] = useState([]);
+  const [newCandidate, setNewCandidate] = useState("");
+  const [newVoter, setNewVoter] = useState("");
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [status, setStatus] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [winner, setWinner] = useState(null);
+  const [isRegistered, setIsRegistered] = useState(false);
+  const [hasVoted, setHasVoted] = useState(false);
+
+  useEffect(() => {
+    loadElectionData();
+  }, [election]);
+
+  const loadElectionData = async () => {
+    try {
+      const title = await election.contract.title();
+      setTitle(title);
+
+      const admin = await election.contract.owner();
+      setIsAdmin(admin.toLowerCase() === account.toLowerCase());
+
+      const count = await election.contract.candidatesCount();
+      const list = [];
+      for (let i = 1; i <= Number(count); i++) {
+        const c = await election.contract.candidates(i);
+        list.push({ id: i, name: c.name, votes: Number(c.voteCount) });
+      }
+      setCandidates(list);
+
+      const started = await election.contract.started();
+      const ended = await election.contract.ended();
+      setStatus(ended ? "Ended" : started ? "Voting" : "Idle");
+
+      const reg = await election.contract.isRegistered(account);
+      setIsRegistered(reg);
+
+      const voted = await election.contract.hasVoted(account);
+      setHasVoted(voted);
+
+      if (ended) {
+        const [id, name, votes] = await election.contract.getWinner();
+        if (id > 0) setWinner({ id, name, votes: Number(votes) });
+      }
+    } catch (err) {
+      console.error("Error loading election data:", err);
+    }
+  };
+
+  // --- Admin Functions ---
+  const addCandidate = async () => {
+    if (!isAdmin) return alert("Only admin can add candidates!");
+    if (!newCandidate.trim()) return alert("Enter candidate name!");
+    try {
+      setLoading(true);
+      const tx = await election.contract.addCandidate(newCandidate);
+      await tx.wait();
+      alert("✅ Candidate added!");
+      setNewCandidate("");
+      await loadElectionData();
+    } catch (err) {
+      console.error("Error adding candidate:", err);
+      alert(err.reason || err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const registerVoter = async () => {
+    if (!isAdmin) return alert("Only admin can register voters!");
+    if (!newVoter.trim()) return alert("Enter voter address!");
+    try {
+      setLoading(true);
+      const tx = await election.contract.registerVoter(newVoter);
+      await tx.wait();
+      alert("✅ Voter registered!");
+      setNewVoter("");
+    } catch (err) {
+      console.error("Error registering voter:", err);
+      alert(err.reason || err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const startElection = async () => {
+    if (!isAdmin) return;
+    try {
+      setLoading(true);
+      const tx = await election.contract.startElection();
+      await tx.wait();
+      alert("🚀 Election started!");
+      await loadElectionData();
+    } catch (err) {
+      console.error("Error starting election:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const endElection = async () => {
+    if (!isAdmin) return;
+    try {
+      setLoading(true);
+      const tx = await election.contract.endElection();
+      await tx.wait();
+      alert("🏁 Election ended!");
+      await loadElectionData();
+    } catch (err) {
+      console.error("Error ending election:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // --- Voter Function ---
+  const vote = async (candidateId) => {
+    if (!isRegistered) return alert("You are not registered for this election!");
+    if (status !== "Voting") return alert("Election not active!");
+    try {
+      setLoading(true);
+      const tx = await election.contract.vote(candidateId);
+      await tx.wait();
+      alert("🗳️ Vote submitted!");
+      await loadElectionData();
+    } catch (err) {
+      console.error("Voting error:", err);
+      alert(err.reason || err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <main className="container">
+      <button onClick={onBack} className="action-btn small">
+        ← Back
+      </button>
+
+      <h2>{title}</h2>
+      <p>Status: <strong>{status}</strong></p>
+
+      {/* --- ADMIN PANEL --- */}
+      {isAdmin && (
+        <div className="admin-panel">
+          <h3>🧑‍💼 Admin Panel</h3>
+
+          <div>
+            <input
+              type="text"
+              placeholder="New candidate name"
+              value={newCandidate}
+              onChange={(e) => setNewCandidate(e.target.value)}
+            />
+            <button onClick={addCandidate} disabled={loading} className="action-btn primary">
+              Add Candidate
+            </button>
+          </div>
+
+          <div>
+            <input
+              type="text"
+              placeholder="Register voter (address)"
+              value={newVoter}
+              onChange={(e) => setNewVoter(e.target.value)}
+            />
+            <button onClick={registerVoter} disabled={loading} className="action-btn">
+              Register Voter
+            </button>
+          </div>
+
+          <div className="admin-controls">
+            <button onClick={startElection} disabled={loading || status !== "Idle"} className="action-btn primary">
+              Start Election
+            </button>
+            <button onClick={endElection} disabled={loading || status !== "Voting"} className="action-btn danger">
+              End Election
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* --- CANDIDATES --- */}
+      <h3>🗳️ Candidates</h3>
+      {candidates.length === 0 ? (
+        <p>No candidates yet.</p>
+      ) : (
+        <div className="candidate-list">
+          {candidates.map((c) => (
+            <div key={c.id} className="candidate-card">
+              <strong>{c.name}</strong> — Votes: {c.votes}
+              {status === "Voting" && isRegistered && !hasVoted && (
+                <button onClick={() => vote(c.id)} className="action-btn small">Vote</button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* --- WINNER --- */}
+      {status === "Ended" && winner && (
+        <div className="winner">
+          <h3>🏆 Winner</h3>
+          <p>{winner.name} ({winner.votes} votes)</p>
+        </div>
+      )}
+    </main>
+  );
+}
+
 
 export default App;

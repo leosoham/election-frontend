@@ -1,8 +1,9 @@
 import { ethers } from "ethers";
-import { CONTRACT_ADDRESS } from "./config";
-import ElectionABI from "./abi/Election.json"; // path to your ABI
+import { electionFactoryAddress, factoryContractAddress } from "./config"; // this should come from your new deploy script
+import ElectionFactoryABI from "./abi/ElectionFactory.json"; // ✅ Factory ABI
+import ElectionABI from "./abi/ElectionSystem.json"; // ✅ Individual Election ABI
 
-// Get Ethereum provider from MetaMask
+// ---- Basic setup ----
 function getProvider() {
   if (!window.ethereum) {
     alert("Please install MetaMask!");
@@ -11,14 +12,33 @@ function getProvider() {
   return new ethers.BrowserProvider(window.ethereum);
 }
 
-// Get signer (the connected wallet)
 async function getSigner() {
   const provider = getProvider();
   return await provider.getSigner();
 }
 
-// Create contract instance for reading/writing
-export async function getContract() {
+// ---- Factory Contract ----
+export async function getFactoryContract() {
   const signer = await getSigner();
-  return new ethers.Contract(CONTRACT_ADDRESS, ElectionABI.abi, signer);
+  return new ethers.Contract(factoryContractAddress, ElectionFactoryABI.abi, signer);
+}
+
+// ---- Election Contract ----
+export async function getElectionContract(electionAddress) {
+  const signer = await getSigner();
+  return new ethers.Contract(electionAddress, ElectionABI.abi, signer);
+}
+
+// ---- Helper: Create new election ----
+export async function createNewElection(title) {
+  const factory = await getFactoryContract();
+  const tx = await factory.createElection(title);
+  await tx.wait();
+  alert(`✅ Election "${title}" created successfully!`);
+}
+
+// ---- Helper: Get all elections ----
+export async function getAllElections() {
+  const factory = await getFactoryContract();
+  return await factory.getAllElections(); // returns list of addresses
 }

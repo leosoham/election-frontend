@@ -1,4 +1,15 @@
-import { SEPOLIA } from "./config";
+// Network configuration
+const SEPOLIA = {
+  chainId: "0xaa36a7", // 11155111 in hex
+  chainName: "Sepolia Test Network",
+  nativeCurrency: {
+    name: "SepoliaETH",
+    symbol: "ETH",
+    decimals: 18,
+  },
+  rpcUrls: ["https://sepolia.infura.io/v3/12722f05ed1a4168bd766a2d431ba1bd"],
+  blockExplorerUrls: ["https://sepolia.etherscan.io"],
+};
 
 export async function connectWallet() {
   if (!window.ethereum) {
