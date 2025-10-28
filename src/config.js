@@ -1,3 +1,3 @@
 // ⚙️ Auto-generated after deployment
-export const electionFactoryAddress = "0x468e4E56A31EeAb8BF1B030428f92855f8d2EB40";
-export const factoryContractAddress = "0x468e4E56A31EeAb8BF1B030428f92855f8d2EB40";
+export const electionFactoryAddress = "0x830DA58457D4e2f72228e20b9e09b7c1E48e4A89";
+export const factoryContractAddress = "0x830DA58457D4e2f72228e20b9e09b7c1E48e4A89";

@@ -624,3 +624,271 @@ li strong {
   font-weight: 600;
   color: var(--text-primary);
 }
+
+/* CSV Upload Component Styles */
+.csv-upload-section {
+  background: var(--card-background);
+  padding: 2rem;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  margin-bottom: 2rem;
+  border-left: 4px solid var(--success-color);
+}
+
+.csv-upload-section h3 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin-bottom: 1.5rem;
+  color: var(--text-primary);
+}
+
+.upload-area {
+  margin-bottom: 1.5rem;
+}
+
+.file-input {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  border: 2px dashed var(--border-color);
+  border-radius: var(--radius);
+  background: var(--background-color);
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-bottom: 0.5rem;
+}
+
+.file-input:hover {
+  border-color: var(--primary-color);
+  background: rgba(37, 99, 235, 0.05);
+}
+
+.file-info {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.csv-preview {
+  margin-bottom: 1.5rem;
+}
+
+.csv-preview h4 {
+  font-size: 1.125rem;
+  font-weight: 600;
+  margin-bottom: 1rem;
+  color: var(--text-primary);
+}
+
+.preview-table {
+  overflow-x: auto;
+}
+
+.preview-table table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--background-color);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.preview-table th,
+.preview-table td {
+  padding: 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.preview-table th {
+  background: var(--primary-color);
+  color: white;
+  font-weight: 600;
+}
+
+.preview-table td {
+  color: var(--text-primary);
+}
+
+.upload-actions {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.voter-status {
+  background: var(--background-color);
+  padding: 1rem;
+  border-radius: var(--radius);
+  margin-bottom: 1.5rem;
+  border: 1px solid var(--border-color);
+}
+
+.voter-status p {
+  margin-bottom: 0.5rem;
+  font-size: 0.875rem;
+}
+
+.voter-status p:last-child {
+  margin-bottom: 0;
+}
+
+/* Voter Authentication Component Styles */
+.voter-auth-section {
+  background: var(--card-background);
+  padding: 2rem;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  margin-bottom: 2rem;
+  border-left: 4px solid var(--warning-color);
+}
+
+.voter-auth-section h3 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin-bottom: 1.5rem;
+  color: var(--text-primary);
+}
+
+.auth-form {
+  margin-bottom: 1rem;
+}
+
+.auth-input {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  font-size: 1rem;
+  margin-bottom: 1rem;
+  transition: all 0.2s;
+}
+
+.auth-input:focus {
+  outline: none;
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+.auth-success {
+  text-align: center;
+}
+
+.success-card {
+  background: var(--background-color);
+  padding: 1.5rem;
+  border-radius: var(--radius);
+  border: 2px solid var(--success-color);
+  margin-bottom: 1rem;
+}
+
+.success-card h4 {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--success-color);
+  margin-bottom: 1rem;
+}
+
+.success-card p {
+  margin-bottom: 0.5rem;
+  color: var(--text-primary);
+}
+
+.success-card p:last-child {
+  margin-bottom: 0;
+}
+
+/* Vote Message Styles */
+.vote-message {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+/* Error and Success Messages */
+.error-message {
+  background: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius);
+  margin-top: 1rem;
+  font-weight: 500;
+}
+
+.success-message {
+  background: #d1fae5;
+  color: #065f46;
+  border: 1px solid #a7f3d0;
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius);
+  margin-top: 1rem;
+  font-weight: 500;
+}
+
+/* Refresh button and status styles */
+.refresh-section {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+  padding: 0.5rem 0;
+}
+
+.refresh-info {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.last-updated {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+}
+
+.refresh-btn {
+  background: var(--secondary-color);
+  color: white;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: var(--radius);
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 0.875rem;
+}
+
+.refresh-btn:hover {
+  background: #475569;
+}
+
+.refresh-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Responsive adjustments for new components */
+@media (max-width: 768px) {
+  .upload-actions {
+    flex-direction: column;
+  }
+  
+  .preview-table {
+    font-size: 0.875rem;
+  }
+  
+  .csv-upload-section,
+  .voter-auth-section {
+    padding: 1.5rem;
+  }
+  
+  .refresh-section {
+    flex-direction: column;
+    gap: 0.5rem;
+    align-items: flex-start;
+  }
+  
+  .refresh-info {
+    flex-direction: column;
+    gap: 0.5rem;
+    align-items: flex-start;
+  }
+}

@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { getFactoryContract, getElectionContract } from "./contract";
+import CSVUpload from "./components/CSVUpload";
+import VoterAuthentication from "./components/VoterAuthentication";
 import "./App.css";
 
 function App() {
@@ -294,10 +296,70 @@ function ElectionPage({ election, onBack, account }) {
   const [winner, setWinner] = useState(null);
   const [isRegistered, setIsRegistered] = useState(false);
   const [hasVoted, setHasVoted] = useState(false);
+  
+  // New state for voter authentication and CSV features
+  const [voterListFinalized, setVoterListFinalized] = useState(false);
+  const [totalVoters, setTotalVoters] = useState(0);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [authenticatedVoter, setAuthenticatedVoter] = useState(null);
+  const [lastRefresh, setLastRefresh] = useState(Date.now());
 
   useEffect(() => {
     loadElectionData();
   }, [election]);
+
+  // Listen to contract events to update UI in real-time for all users
+  useEffect(() => {
+    const contract = election?.contract;
+    if (!contract) return;
+
+    const handleVoted = async () => {
+      try {
+        await loadElectionData();
+        setLastRefresh(Date.now());
+      } catch (e) {
+        console.error("Error handling Voted event:", e);
+      }
+    };
+
+    const handleElectionEnded = async () => {
+      try {
+        await loadElectionData();
+        setLastRefresh(Date.now());
+        // Ensure winner is fetched immediately
+        try {
+          const [id, name, votes] = await contract.getWinner();
+          if (Number(id) > 0) setWinner({ id, name, votes: Number(votes) });
+        } catch (err) {
+          console.error("Error fetching winner after end:", err);
+        }
+      } catch (e) {
+        console.error("Error handling ElectionEnded event:", e);
+      }
+    };
+
+    contract.on('Voted', handleVoted);
+    contract.on('ElectionEnded', handleElectionEnded);
+
+    return () => {
+      try {
+        contract.off('Voted', handleVoted);
+        contract.off('ElectionEnded', handleElectionEnded);
+      } catch (_) {}
+    };
+  }, [election?.contract]);
+
+  // Auto-refresh every 10 seconds when election is active
+  useEffect(() => {
+    if (status === "Voting" || status === "Ended") {
+      const interval = setInterval(() => {
+        loadElectionData();
+        setLastRefresh(Date.now());
+      }, 10000); // Refresh every 10 seconds
+
+      return () => clearInterval(interval);
+    }
+  }, [status, election.contract]);
 
   const loadElectionData = async () => {
     try {
@@ -324,6 +386,26 @@ function ElectionPage({ election, onBack, account }) {
 
       const voted = await election.contract.hasVoted(account);
       setHasVoted(voted);
+
+      // Load voter database information
+      try {
+        const [finalized, totalVotersCount] = await election.contract.getVoterListStatus();
+        setVoterListFinalized(finalized);
+        setTotalVoters(Number(totalVotersCount));
+
+        // Check if current wallet is registered in voter database
+        const walletRegistered = await election.contract.isWalletRegistered(account);
+        if (walletRegistered) {
+          const uniqueId = await election.contract.getVoterUniqueId(account);
+          const [name, isValid] = await election.contract.authenticateVoter(uniqueId);
+          if (isValid) {
+            setIsAuthenticated(true);
+            setAuthenticatedVoter({ name, uniqueId });
+          }
+        }
+      } catch (err) {
+        console.log("Voter database not available (using legacy system)");
+      }
 
       if (ended) {
         const [id, name, votes] = await election.contract.getWinner();
@@ -378,6 +460,7 @@ function ElectionPage({ election, onBack, account }) {
       await tx.wait();
       alert("🚀 Election started!");
       await loadElectionData();
+      setLastRefresh(Date.now());
     } catch (err) {
       console.error("Error starting election:", err);
     } finally {
@@ -393,6 +476,7 @@ function ElectionPage({ election, onBack, account }) {
       await tx.wait();
       alert("🏁 Election ended!");
       await loadElectionData();
+      setLastRefresh(Date.now());
     } catch (err) {
       console.error("Error ending election:", err);
     } finally {
@@ -402,17 +486,52 @@ function ElectionPage({ election, onBack, account }) {
 
   // --- Voter Function ---
   const vote = async (candidateId) => {
-    if (!isRegistered) return alert("You are not registered for this election!");
+    // Check authentication for new system
+    if (voterListFinalized && !isAuthenticated) {
+      return alert("Please authenticate with your unique ID first!");
+    }
+    
+    // Check traditional registration for legacy system
+    if (!voterListFinalized && !isRegistered) {
+      return alert("You are not registered for this election!");
+    }
+    
     if (status !== "Voting") return alert("Election not active!");
+    
     try {
       setLoading(true);
       const tx = await election.contract.vote(candidateId);
       await tx.wait();
       alert("🗳️ Vote submitted!");
       await loadElectionData();
+      setLastRefresh(Date.now());
     } catch (err) {
       console.error("Voting error:", err);
       alert(err.reason || err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Handler for CSV upload completion
+  const handleVotersAdded = () => {
+    loadElectionData();
+  };
+
+  // Handler for voter authentication
+  const handleVoterAuthenticated = (voterData) => {
+    setIsAuthenticated(true);
+    setAuthenticatedVoter(voterData);
+  };
+
+  // Manual refresh function
+  const refreshElectionData = async () => {
+    setLoading(true);
+    try {
+      await loadElectionData();
+      setLastRefresh(Date.now());
+    } catch (err) {
+      console.error("Error refreshing election data:", err);
     } finally {
       setLoading(false);
     }
@@ -425,12 +544,43 @@ function ElectionPage({ election, onBack, account }) {
       </button>
 
       <h2>{title}</h2>
-      <p>Status: <strong>{status}</strong></p>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+        <p>Status: <strong>{status}</strong></p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          <small style={{ color: '#64748b', fontSize: '0.875rem' }}>
+            Last updated: {new Date(lastRefresh).toLocaleTimeString()}
+          </small>
+          <button 
+            onClick={refreshElectionData} 
+            className="action-btn small"
+            disabled={loading}
+            style={{ background: '#64748b' }}
+          >
+            {loading ? '⏳ Refreshing...' : '🔄 Refresh'}
+          </button>
+        </div>
+      </div>
 
       {/* --- ADMIN PANEL --- */}
       {isAdmin && (
         <div className="admin-panel">
           <h3>🧑‍💼 Admin Panel</h3>
+
+          {/* Voter List Status */}
+          {totalVoters > 0 && (
+            <div className="voter-status">
+              <p><strong>Voter Database:</strong> {totalVoters} voters registered</p>
+              <p><strong>Status:</strong> {voterListFinalized ? "✅ Finalized" : "⚠️ Not Finalized"}</p>
+            </div>
+          )}
+
+          {/* CSV Upload Component */}
+          <CSVUpload
+            onVotersAdded={handleVotersAdded}
+            electionContract={election.contract}
+            isAdmin={isAdmin}
+            disabled={voterListFinalized || status !== "Idle"}
+          />
 
           <div>
             <input
@@ -444,17 +594,20 @@ function ElectionPage({ election, onBack, account }) {
             </button>
           </div>
 
-          <div>
-            <input
-              type="text"
-              placeholder="Register voter (address)"
-              value={newVoter}
-              onChange={(e) => setNewVoter(e.target.value)}
-            />
-            <button onClick={registerVoter} disabled={loading} className="action-btn">
-              Register Voter
-            </button>
-          </div>
+          {/* Legacy voter registration (only show if voter list not finalized) */}
+          {!voterListFinalized && (
+            <div>
+              <input
+                type="text"
+                placeholder="Register voter (address)"
+                value={newVoter}
+                onChange={(e) => setNewVoter(e.target.value)}
+              />
+              <button onClick={registerVoter} disabled={loading} className="action-btn">
+                Register Voter (Legacy)
+              </button>
+            </div>
+          )}
 
           <div className="admin-controls">
             <button onClick={startElection} disabled={loading || status !== "Idle"} className="action-btn primary">
@@ -467,6 +620,15 @@ function ElectionPage({ election, onBack, account }) {
         </div>
       )}
 
+      {/* --- VOTER AUTHENTICATION --- */}
+      {!isAdmin && voterListFinalized && (
+        <VoterAuthentication
+          electionContract={election.contract}
+          onAuthenticated={handleVoterAuthenticated}
+          account={account}
+        />
+      )}
+
       {/* --- CANDIDATES --- */}
       <h3>🗳️ Candidates</h3>
       {candidates.length === 0 ? (
@@ -476,8 +638,24 @@ function ElectionPage({ election, onBack, account }) {
           {candidates.map((c) => (
             <div key={c.id} className="candidate-card">
               <strong>{c.name}</strong> — Votes: {c.votes}
-              {status === "Voting" && isRegistered && !hasVoted && (
-                <button onClick={() => vote(c.id)} className="action-btn small">Vote</button>
+              {status === "Voting" && !hasVoted && (
+                <>
+                  {/* New authentication system */}
+                  {voterListFinalized && isAuthenticated && (
+                    <button onClick={() => vote(c.id)} className="action-btn small">Vote</button>
+                  )}
+                  {/* Legacy system */}
+                  {!voterListFinalized && isRegistered && (
+                    <button onClick={() => vote(c.id)} className="action-btn small">Vote</button>
+                  )}
+                  {/* Show message if not authenticated/registered */}
+                  {voterListFinalized && !isAuthenticated && (
+                    <span className="vote-message">Please authenticate first</span>
+                  )}
+                  {!voterListFinalized && !isRegistered && (
+                    <span className="vote-message">Not registered</span>
+                  )}
+                </>
               )}
             </div>
           ))}
