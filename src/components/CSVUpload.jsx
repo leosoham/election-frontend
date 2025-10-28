@@ -71,39 +71,66 @@ const CSVUpload = ({ onVotersAdded, electionContract, isAdmin, disabled }) => {
     setSuccess('');
 
     try {
-      let successCount = 0;
-      let errorCount = 0;
-
+      // Prepare arrays
+      const names = [];
+      const uniqueIds = [];
+      const walletIds = [];
       for (const voter of csvData) {
-        try {
-          // Validate wallet address format
-          if (!/^0x[a-fA-F0-9]{40}$/.test(voter.walletId)) {
-            console.error(`Invalid wallet address: ${voter.walletId}`);
-            errorCount++;
-            continue;
-          }
-
-          const tx = await electionContract.addVoterData(
-            voter.name,
-            voter.uniqueId,
-            voter.walletId
-          );
-          await tx.wait();
-          successCount++;
-        } catch (err) {
-          console.error(`Error adding voter ${voter.name}:`, err);
-          errorCount++;
+        if (!/^0x[a-fA-F0-9]{40}$/.test(voter.walletId)) {
+          console.error(`Invalid wallet address: ${voter.walletId}`);
+          continue;
         }
+        names.push(voter.name);
+        uniqueIds.push(voter.uniqueId);
+        walletIds.push(voter.walletId);
       }
 
-      if (successCount > 0) {
-        setSuccess(`Successfully added ${successCount} voters. ${errorCount} failed.`);
+      if (names.length === 0) {
+        setError('No valid voter rows to upload');
+        return;
+      }
+
+      // Detect batch method
+      const hasBatch = typeof electionContract.addVotersBatch === 'function';
+
+      if (hasBatch) {
+        // Chunk large CSVs to avoid block gas limits
+        const chunkSize = 100; // default; adjust if needed
+        let successTotal = 0;
+        for (let i = 0; i < names.length; i += chunkSize) {
+          const n = names.slice(i, i + chunkSize);
+          const u = uniqueIds.slice(i, i + chunkSize);
+          const w = walletIds.slice(i, i + chunkSize);
+          const tx = await electionContract.addVotersBatch(n, u, w);
+          await tx.wait();
+          successTotal += n.length;
+          setSuccess(`Uploaded ${Math.min(i + chunkSize, names.length)}/${names.length} voters...`);
+        }
+        setSuccess(`Successfully added ${successTotal} voters.`);
         onVotersAdded && onVotersAdded();
       } else {
-        setError(`Failed to add any voters. ${errorCount} errors occurred.`);
+        // Fallback: per-voter transactions
+        let successCount = 0;
+        let errorCount = 0;
+        for (let i = 0; i < names.length; i++) {
+          try {
+            const tx = await electionContract.addVoterData(names[i], uniqueIds[i], walletIds[i]);
+            await tx.wait();
+            successCount++;
+          } catch (err) {
+            console.error(`Error adding voter ${names[i]}:`, err);
+            errorCount++;
+          }
+        }
+        if (successCount > 0) {
+          setSuccess(`Successfully added ${successCount} voters. ${errorCount} failed.`);
+          onVotersAdded && onVotersAdded();
+        } else {
+          setError(`Failed to add any voters. ${errorCount} errors occurred.`);
+        }
       }
     } catch (err) {
-      setError('Error uploading voters: ' + err.message);
+      setError('Error uploading voters: ' + (err.reason || err.message));
     } finally {
       setLoading(false);
     }
